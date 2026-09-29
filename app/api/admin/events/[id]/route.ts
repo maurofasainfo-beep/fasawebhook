@@ -13,3 +13,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return json(event);
   });
 }
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  return safe(async () => {
+    const env = config(); requireDashboard(request, env.appUrl);
+    const { id } = await context.params;
+    if (!isUuid(id)) throw new HttpError(404, 'Evento não encontrado.');
+    if (!(await repository().deleteEvent(id))) throw new HttpError(404, 'Evento não encontrado.');
+    return json({ deleted: true });
+  });
+}

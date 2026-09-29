@@ -16,7 +16,9 @@ CREATE TABLE public.webhooks (
   auth_token_hash text NOT NULL CHECK (auth_token_hash ~ '^[a-f0-9]{64}$'),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  last_received_at timestamptz
+  last_received_at timestamptz,
+  -- Archived webhooks remain available for their historical logs.
+  deleted_at timestamptz
 );
 
 CREATE TABLE public.webhook_events (
@@ -72,7 +74,7 @@ DECLARE
   v_error text := p_event->>'error_message';
 BEGIN
   IF v_status = 'received' THEN
-    SELECT * INTO v_hook FROM public.webhooks WHERE id = v_webhook_id FOR UPDATE;
+    SELECT * INTO v_hook FROM public.webhooks WHERE id = v_webhook_id AND deleted_at IS NULL FOR UPDATE;
     IF NOT FOUND THEN
       v_webhook_id := NULL;
       v_http := 404; v_error := 'Webhook não encontrado.';
@@ -103,17 +105,33 @@ BEGIN
 END;
 $$;
 
+-- Admin only. Removes logs for one connection after the UI confirms explicitly.
+CREATE FUNCTION public.delete_webhook_events(p_public_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
+DECLARE
+  v_deleted_count bigint;
+BEGIN
+  PERFORM 1 FROM public.webhooks WHERE public_id = p_public_id FOR UPDATE;
+  DELETE FROM public.webhook_events
+  WHERE webhook_id = (SELECT id FROM public.webhooks WHERE public_id = p_public_id);
+  GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+  RETURN jsonb_build_object('deletedCount', v_deleted_count);
+END;
+$$;
+
 -- Sem políticas públicas. Browser nunca acessa estas tabelas diretamente.
 ALTER TABLE public.webhooks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.webhook_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.webhooks, public.webhook_events FROM PUBLIC, anon, authenticated;
 GRANT USAGE ON SCHEMA public TO service_role;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.webhooks TO service_role;
-GRANT SELECT, INSERT ON TABLE public.webhook_events TO service_role;
+GRANT SELECT, INSERT, DELETE ON TABLE public.webhook_events TO service_role;
 REVOKE ALL ON FUNCTION public.webhook_touch_updated_at() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.record_webhook_event(jsonb, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.delete_webhook_events(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.webhook_touch_updated_at() TO service_role;
 GRANT EXECUTE ON FUNCTION public.record_webhook_event(jsonb, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.delete_webhook_events(uuid) TO service_role;
 
 COMMENT ON TABLE public.webhooks IS 'Configuração operacional; tokens AES-256-GCM e hash SHA-256. A chave de criptografia existe somente no servidor.';
 COMMENT ON TABLE public.webhook_events IS 'Recebimentos e rejeições. Não cria pedidos. Payload apenas para JSON autenticado e aceito.';
@@ -121,5 +139,7 @@ COMMENT ON COLUMN public.webhooks.last_received_at IS 'Último evento aceito e p
 COMMENT ON COLUMN public.webhook_events.external_event_id IS 'ID opcional do fornecedor, sem deduplicação automática nesta versão.';
 COMMENT ON COLUMN public.webhook_events.processed_at IS 'Reservado para processador futuro; receiver mantém NULL.';
 COMMENT ON FUNCTION public.record_webhook_event(jsonb, text) IS 'Backend somente. Transação de recebimento com revalidação de ativo e token.';
+COMMENT ON COLUMN public.webhooks.deleted_at IS 'Arquivamento lógico: desativa recebimento e preserva os eventos históricos.';
+COMMENT ON FUNCTION public.delete_webhook_events(uuid) IS 'Backend somente. Exclui logs de um webhook após confirmação explícita no painel.';
 NOTIFY pgrst, 'reload schema';
 COMMIT;

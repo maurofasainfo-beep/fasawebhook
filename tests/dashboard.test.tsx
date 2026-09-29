@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import Dashboard from '@/components/dashboard';
 import type { Webhook } from '@/types/webhook';
 
-const hook: Webhook = { id: 'hook', public_id: 'public-uuid', name: 'Integração Principal', module: 'delivery_webhook', active: true, auth_enabled: true, created_at: '2026-09-25T12:00:00Z', updated_at: '2026-09-25T12:00:00Z', last_received_at: null, url: 'https://example.com/api/webhooks/receive/public-uuid', token: 'test-webhook-token' };
+const hook: Webhook = { id: 'hook', public_id: 'public-uuid', name: 'Integração Principal', module: 'delivery_webhook', active: true, auth_enabled: true, created_at: '2026-09-25T12:00:00Z', updated_at: '2026-09-25T12:00:00Z', last_received_at: null, deleted_at: null, url: 'https://example.com/api/webhooks/receive/public-uuid', token: 'test-webhook-token' };
 const item = { id: 'event-1', webhook_id: hook.id, webhook: { name: hook.name }, received_at: hook.created_at, status: 'received', http_status: 202, source_ip: null, external_event_id: null };
 beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
@@ -58,6 +58,7 @@ describe('painel operacional', () => {
     mockFetch(url => {
       if (url.endsWith('/event-1')) return { ...item, http_method: 'POST', content_type: 'application/json', payload: { event: 'order.created' }, headers: { 'content-type': 'application/json' }, error_message: null };
       if (url.includes('/events')) return { items: [item], page: url.includes('page=2') ? 2 : 1, pageSize: 20, hasMore: !url.includes('page=2') };
+      if (url.includes('/options')) return { items: [hook], page: 1, pageSize: 20, hasMore: false };
       return { items: [], page: 1, pageSize: 20, hasMore: false };
     });
     const user = userEvent.setup(); render(<Dashboard />);
@@ -78,8 +79,8 @@ describe('painel operacional', () => {
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
   });
   it('mostra estado vazio dos logs', async () => {
-    mockFetch(() => ({ items: [], page: 1, pageSize: 20, hasMore: false }));
+    mockFetch(url => url.includes('/options') ? { items: [hook], page: 1, pageSize: 20, hasMore: false } : { items: [], page: 1, pageSize: 20, hasMore: false });
     const user = userEvent.setup(); render(<Dashboard />); await user.click(screen.getByRole('tab', { name: 'Logs' }));
-    expect(await screen.findByText('Nenhum evento recebido até o momento.')).toBeInTheDocument();
+    expect(await screen.findByText(`Nenhum log para ${hook.name}.`)).toBeInTheDocument();
   });
 });

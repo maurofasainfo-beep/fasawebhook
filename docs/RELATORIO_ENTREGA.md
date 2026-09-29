@@ -1,12 +1,14 @@
 # Relatório de entrega — Webhook Delivery
 
-Data: 25/09/2026.
+Data: 29/09/2026.
 
 ## Escopo e implementação
 
 Projeto novo em `C:\Users\User\Desktop\webhook-delivery`. Todo o código criado nesta entrega está nessa pasta. Nenhum código de outros projetos foi alterado.
 
 Painel operacional em português, sem autenticação de usuário. Criação de várias conexões, UUID/URL automática e permanente, edição de nome/status, tokens recuperáveis e copiáveis, confirmação de troca de token, receiver genérico JSON, persistência e erros, último recebimento, logs paginados e detalhe/cópia de JSON. Nenhum pedido é criado automaticamente.
+
+Logs filtrados por webhook, com exclusão de eventos individuais e limpeza total da conexão selecionada após confirmação. Excluir webhook faz arquivamento lógico: interrompe novos recebimentos e mantém seu histórico. Incluído SQL idempotente de atualização para instalações anteriores.
 
 ## Arquitetura
 
@@ -27,6 +29,8 @@ Navegador → Next.js App Router/Route Handlers → `services` → cliente priva
 
 `public.webhook_events`: `id`, `webhook_id`, `requested_public_id`, `http_method`, `content_type`, `payload`, `headers`, `source_ip`, `status`, `http_status`, `error_message`, `external_event_id`, `received_at`, `processed_at`, `created_at`.
 
+`public.webhooks.deleted_at` registra conexões arquivadas. FK RESTRICT e histórico são preservados.
+
 IDs UUID, JSONB, timestamptz; FK com `ON DELETE RESTRICT`; índices de identificação, data/paginação, webhook e status. Trigger atualiza `updated_at`. `processed_at` reservado ao processador futuro.
 
 **Arquivo pronto para Supabase SQL Editor:**
@@ -41,9 +45,12 @@ SQL autossuficiente em uma transação; nenhuma substituição manual ou Supabas
 | --- | --- |
 | GET / POST | `/api/admin/webhooks` |
 | PATCH | `/api/admin/webhooks/:publicId` |
+| DELETE | `/api/admin/webhooks/:publicId` (arquiva sem apagar histórico) |
 | POST | `/api/admin/webhooks/:publicId/token` |
-| GET | `/api/admin/events` |
+| GET | `/api/admin/webhooks/options?page=1` |
+| GET / DELETE | `/api/admin/events` (obrigatório selecionar `webhookId`) |
 | GET | `/api/admin/events/:id` |
+| DELETE | `/api/admin/events/:id` |
 | POST | `/api/webhooks/receive/:publicId` |
 
 Listagens: `?page=1`, até 20 itens por página. Receiver: Authorization Bearer ou X-Webhook-Token. Evento aceito retorna 202 e `eventId`. HTTP 403 identifica webhook inativo.
@@ -54,7 +61,7 @@ Listagens: `?page=1`, até 20 itens por página. Receiver: Authorization Bearer 
 | --- | --- |
 | `npm.cmd run lint` | Aprovado, sem erros ou avisos. |
 | `npm.cmd run typecheck` | Aprovado. |
-| `npm.cmd test` | **63 testes aprovados**, 5 arquivos de teste. |
+| `npm.cmd test` | **71 testes aprovados**, 5 arquivos de teste. |
 | `npm.cmd run build` | Aprovado; página e todas as APIs geradas. |
 | `npm.cmd run test:http` | 4 verificações aprovadas contra servidor Next de produção temporário. |
 | `npm.cmd audit` | Zero vulnerabilidades reportadas. |
@@ -77,8 +84,8 @@ Smoke HTTP: página 200 sem login; headers de proteção; método inválido 405/
 ## Instalação pelo operador
 
 1. Criar um projeto no Supabase.
-2. Abrir **SQL Editor → New query**.
-3. Copiar o arquivo `supabase_webhook.sql` inteiro, colar e clicar **Run**.
+2. Abrir **SQL Editor → New query**. Em instalação nova, usar `supabase_webhook.sql`; em banco da versão anterior, usar `supabase_webhook_update.sql`.
+3. Copiar o SQL escolhido inteiro, colar e clicar **Run**.
 4. Copiar `.env.example` para `.env.local`.
 5. Preencher URL/chave privada do Supabase, URL pública, limite e chave AES. A chave AES é gerada com `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
 6. Executar `npm.cmd ci` e `npm.cmd run dev` na pasta do projeto.
@@ -106,12 +113,14 @@ next.config.ts
 eslint.config.mjs
 vitest.config.ts
 supabase_webhook.sql
+supabase_webhook_update.sql
 app/layout.tsx
 app/page.tsx
 app/globals.css
 app/api/admin/webhooks/route.ts
 app/api/admin/webhooks/[publicId]/route.ts
 app/api/admin/webhooks/[publicId]/token/route.ts
+app/api/admin/webhooks/options/route.ts
 app/api/admin/events/route.ts
 app/api/admin/events/[id]/route.ts
 app/api/webhooks/receive/[publicId]/route.ts

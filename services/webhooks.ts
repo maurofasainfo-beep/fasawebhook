@@ -33,3 +33,16 @@ export async function rotateToken(db: Repository, publicId: string, body: Json, 
   if (!row) throw new HttpError(404, 'Webhook não encontrado.');
   return row;
 }
+
+export async function archiveWebhook(db: Repository, publicId: string, body: Json) {
+  if (values(body).confirm !== true) throw new HttpError(400, 'Confirme a exclusão do webhook.');
+  const row = await db.update(publicId, { deleted_at: new Date().toISOString() });
+  if (!row) throw new HttpError(404, 'Webhook não encontrado.');
+  return { archived: true as const, publicId: row.public_id };
+}
+
+export async function clearWebhookEvents(db: Repository, publicId: string, body: Json) {
+  if (values(body).confirm !== true) throw new HttpError(400, 'Confirme a exclusão dos logs.');
+  if (!(await db.find(publicId, true))) throw new HttpError(404, 'Webhook não encontrado.');
+  return { deletedCount: await db.clearEvents(publicId) };
+}

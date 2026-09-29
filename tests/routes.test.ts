@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture, key } from './fixtures';
 import { GET as list, POST as create } from '@/app/api/admin/webhooks/route';
+import { GET as options } from '@/app/api/admin/webhooks/options/route';
 import { PATCH as update } from '@/app/api/admin/webhooks/[publicId]/route';
 import { POST as rotate } from '@/app/api/admin/webhooks/[publicId]/token/route';
-import { GET as events } from '@/app/api/admin/events/route';
-import { GET as detail } from '@/app/api/admin/events/[id]/route';
+import { GET as events, DELETE as clearEvents } from '@/app/api/admin/events/route';
+import { GET as detail, DELETE as deleteEvent } from '@/app/api/admin/events/[id]/route';
+import { DELETE as archiveWebhook } from '@/app/api/admin/webhooks/[publicId]/route';
 import { POST as receiver, GET as receiverGet } from '@/app/api/webhooks/receive/[publicId]/route';
 import { repository } from '@/services/repository';
 vi.mock('@/services/repository', () => ({ repository: vi.fn() }));
@@ -39,10 +41,29 @@ describe('Route Handlers do Next.js', () => {
     expect(res.status).toBe(200); expect((await res.json()).token).not.toBe(f.token);
   });
   it('lista logs com página validada e rejeita detalhe inexistente', async () => {
-    const listRes = await events(request('/api/admin/events?page=2'));
-    expect(await listRes.json()).toMatchObject({ page: 2, pageSize: 20 }); expect(f.db.events).toHaveBeenCalledWith(2);
+    const listRes = await events(request(`/api/admin/events?page=2&webhookId=${f.row.public_id}`));
+    expect(await listRes.json()).toMatchObject({ page: 2, pageSize: 20 }); expect(f.db.events).toHaveBeenCalledWith(2, f.row.public_id);
     const res = await detail(request('/api/admin/events/test'), { params: Promise.resolve({ id: f.row.id }) }); expect(res.status).toBe(404);
     expect((await events(request('/api/admin/events?page=-1'))).status).toBe(400);
+  });
+  it('lista opções sem token, arquiva sem remover histórico e limpa eventos após seleção', async () => {
+    const optionResponse = await options(request('/api/admin/webhooks/options'));
+    expect(await optionResponse.json()).toMatchObject({ items: [{ name: 'Integração Principal' }] });
+    const archived = await archiveWebhook(request(`/api/admin/webhooks/${f.row.public_id}`, 'DELETE', { confirm: true }), context());
+    expect(archived.status).toBe(200); expect(await archived.json()).toMatchObject({ archived: true });
+    expect(f.db.update).toHaveBeenCalledWith(f.row.public_id, { deleted_at: expect.any(String) });
+    const cleared = await clearEvents(request(`/api/admin/events?webhookId=${f.row.public_id}`, 'DELETE', { confirm: true }));
+    expect(cleared.status).toBe(200); expect(await cleared.json()).toMatchObject({ deletedCount: 3 });
+    expect(f.db.clearEvents).toHaveBeenCalledWith(f.row.public_id);
+  });
+  it('exige confirmação explícita ao limpar logs de webhook', async () => {
+    const cleared = await clearEvents(request(`/api/admin/events?webhookId=${f.row.public_id}`, 'DELETE', { confirm: false }));
+    expect(cleared.status).toBe(400); expect(f.db.clearEvents).not.toHaveBeenCalled();
+  });
+  it('exclui log individual e devolve 404 quando ele não existe', async () => {
+    expect((await deleteEvent(request('/api/admin/events/event-1', 'DELETE'), { params: Promise.resolve({ id: f.row.id }) })).status).toBe(200);
+    vi.mocked(f.db.deleteEvent).mockResolvedValue(false);
+    expect((await deleteEvent(request('/api/admin/events/event-1', 'DELETE'), { params: Promise.resolve({ id: f.row.id }) })).status).toBe(404);
   });
   it('recusa chamada administrativa de outro site', async () => {
     const res = await create(new Request('http://localhost:3000/api/admin/webhooks', { method: 'POST', headers: { origin: 'https://evil.example', 'x-dashboard-request': '1' } }));

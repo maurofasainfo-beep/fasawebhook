@@ -77,4 +77,26 @@ describe('SQL completo executado em PostgreSQL', () => {
     await db.exec('ROLLBACK');
     expect((await db.query('SELECT id FROM webhooks WHERE id=$1', [id])).rows).toHaveLength(1);
   });
+  it('aplica a atualização para instalação anterior de forma idempotente', async () => {
+    const update = readFileSync(new URL('../supabase_webhook_update.sql', import.meta.url), 'utf8');
+    // Simulate the schema from the initial release before the archive feature.
+    await db.exec('ALTER TABLE public.webhooks DROP COLUMN deleted_at');
+    await db.exec(update); await db.exec(update);
+    const columns = await db.query<{ column_name: string }>("SELECT column_name FROM information_schema.columns WHERE table_name='webhooks' AND column_name='deleted_at'");
+    expect(columns.rows).toHaveLength(1);
+    await db.query('UPDATE webhooks SET active=true WHERE id=$1', [id]);
+    await record();
+    await db.exec('SET ROLE service_role');
+    try {
+      const removed = await db.query<{ result: { deletedCount: number } }>('SELECT public.delete_webhook_events($1) AS result', [publicId]);
+      expect(removed.rows[0].result.deletedCount).toBeGreaterThanOrEqual(1);
+      expect((await db.query('SELECT id FROM webhook_events WHERE webhook_id=$1', [id])).rows).toHaveLength(0);
+    } finally { await db.exec('RESET ROLE'); }
+  });
+  it('arquiva webhook sem excluir logs e devolve 404 para novos recebimentos', async () => {
+    const before = await db.query<{ id: string }>("INSERT INTO webhook_events (webhook_id,requested_public_id,http_method,status,http_status,payload) VALUES ($1,$2,'POST','received',202,'{}') RETURNING id", [id, publicId]);
+    await db.query('UPDATE webhooks SET deleted_at=now() WHERE id=$1', [id]);
+    const after = await db.query<{ id: string }>('SELECT id FROM webhook_events WHERE webhook_id=$1', [id]);
+    expect(after.rows).toContainEqual({ id: before.rows[0].id });
+  });
 });

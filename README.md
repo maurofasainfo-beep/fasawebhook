@@ -14,7 +14,7 @@ Painel simples, em português, para criar conexões, receber JSON de sistemas ex
 
 1. Crie um projeto no [Supabase](https://supabase.com/dashboard).
 2. Abra **SQL Editor → New query**.
-3. Abra `supabase_webhook.sql` na raiz deste projeto. Copie o arquivo inteiro, cole no editor e clique **Run**. Execute uma única vez em um projeto limpo; não é preciso editar o SQL.
+3. Para uma instalação nova, abra `supabase_webhook.sql`, copie todo o conteúdo, cole no editor e clique **Run**. Se você já instalou a versão anterior, use `supabase_webhook_update.sql` para adicionar a exclusão segura e o filtro por webhook. A atualização pode ser repetida.
 4. No PowerShell:
 
    ```powershell
@@ -56,7 +56,9 @@ O banco guarda `public_id`, não o domínio. Alterar `APP_PUBLIC_URL` muda as UR
 - **Novo token:** exige confirmação e invalida o anterior. Atualize o fornecedor em seguida. A URL permanece igual.
 - **Último recebimento:** data do último evento **aceito e salvo**, convertida para o fuso do navegador. Atualize as configurações para consultar novos recebimentos.
 - **Logs:** 20 registros por página, ordenados por data e ID decrescentes; atualização manual. O detalhe mostra payload, headers permitidos, origem e erro.
-- **Desativar:** bloqueia novos eventos com HTTP 403 e preserva histórico. Não há exclusão nem regeneração de URL nesta versão.
+- **Desativar:** bloqueia novos eventos com HTTP 403 e preserva histórico.
+- **Excluir webhook:** arquiva a conexão, faz sua URL parar de receber novos eventos e preserva todos os logs. Webhooks arquivados permanecem no seletor do histórico.
+- **Excluir logs:** permite excluir um evento individualmente ou limpar todos os logs do webhook selecionado. As duas ações pedem confirmação e são permanentes.
 - Requisições rejeitadas guardam somente metadados e erro, nunca o corpo não autenticado/inválido.
 
 ## Endpoints
@@ -64,11 +66,15 @@ O banco guarda `public_id`, não o domínio. Alterar `APP_PUBLIC_URL` muda as UR
 | Método | Rota | Função |
 | --- | --- | --- |
 | GET | `/api/admin/webhooks?page=1` | Lista até 20 configurações, URL e token recuperável. |
+| GET | `/api/admin/webhooks/options?page=1` | Lista resumida para o filtro de logs, sem tokens. |
 | POST | `/api/admin/webhooks` | Cria; body `{ "name": "Integração Principal" }`. |
 | PATCH | `/api/admin/webhooks/:publicId` | Salva; body `{ "name": "Principal", "active": true }`. |
+| DELETE | `/api/admin/webhooks/:publicId` | Arquiva o webhook e preserva seu histórico após confirmação. |
 | POST | `/api/admin/webhooks/:publicId/token` | Regenera; body `{ "confirm": true }`. |
-| GET | `/api/admin/events?page=1` | Lista resumo, sem carregar payloads inteiros. |
+| GET | `/api/admin/events?page=1&webhookId=UUID` | Lista eventos de um único webhook, sem carregar payloads inteiros. |
 | GET | `/api/admin/events/:id` | Detalhe de um evento. |
+| DELETE | `/api/admin/events/:id` | Apaga um log individual após confirmação. |
+| DELETE | `/api/admin/events?webhookId=UUID` | Apaga os logs do webhook escolhido após confirmação. |
 | POST | `/api/webhooks/receive/:publicId` | Recebe evento externo. |
 
 APIs administrativas usam `X-Dashboard-Request: 1` e verificam `Origin` quando presente. Isso reduz solicitações indevidas de outros sites, **não é autenticação**. As APIs administrativas entregam tokens de webhook por necessidade operacional; devem ter a mesma restrição de rede do painel. Nenhuma resposta contém a chave do Supabase.
@@ -100,8 +106,10 @@ Respostas: 400 JSON/configuração inválida; 401 token ausente/inválido; 403 w
 ## Banco e decisões de segurança
 
 - `public.webhooks`: IDs UUID, nome, módulo, ativo, autenticação obrigatória, token cifrado AES-256-GCM com IV aleatório, hash SHA-256 e timestamps.
+- `public.webhooks.deleted_at` arquiva conexões: impede novos recebimentos sem desvincular ou excluir os registros de evento.
 - `public.webhook_events`: ID UUID, FK para webhook, identificador solicitado, método, Content-Type, JSONB, headers sanitizados, IP, status HTTP/recebimento, erro, ID externo e timestamps.
-- FK `ON DELETE RESTRICT` protege histórico. `webhook_id` pode ser nulo para UUID inexistente. `id` já é o UUID do evento; não há coluna duplicada `event_uuid`.
+- FK `ON DELETE RESTRICT` protege o histórico de exclusão física. `webhook_id` pode ser nulo para UUID inexistente. `id` já é o UUID do evento; não há coluna duplicada `event_uuid`.
+- Exclusões de logs passam por endpoints confirmados e uma RPC dedicada, com filtro obrigatório pelo UUID público do webhook.
 - RLS habilitada; sem políticas públicas; `anon` e `authenticated` sem acesso. Grants e RPC restritos à service role. Funções `SECURITY INVOKER`, com `search_path` fixo.
 - A RPC bloqueia a configuração, revalida ativo/hash e salva evento + último recebimento na mesma transação. Alterações de token/status concorrentes não contornam a validação.
 - O token original só é recuperado no backend. SHA-256 é adequado aqui porque a entrada é aleatória de 256 bits; não é uma senha escolhida por usuário. Comparação por tempo constante no Node.

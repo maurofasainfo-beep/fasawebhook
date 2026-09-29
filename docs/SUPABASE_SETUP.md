@@ -8,13 +8,16 @@ Entre em https://supabase.com/dashboard, clique em **New project**, escolha sua 
 
 1. Abra o projeto e acesse **SQL Editor**.
 2. Clique **New query**.
-3. No computador, abra:
+3. Se você já instalou a versão anterior do sistema, abra o arquivo `supabase_webhook_update.sql` e copie todo o conteúdo. Caso ainda não tenha instalado o sistema, use `supabase_webhook.sql`.
+4. No computador, abra:
 
    `C:\Users\User\Desktop\webhook-delivery\supabase_webhook.sql`
 
-4. Copie **todo** o conteúdo do arquivo, do comentário inicial até `COMMIT;`.
-5. Cole no SQL Editor e clique **Run**.
-6. Verifique no Table Editor as tabelas `public.webhooks` e `public.webhook_events`.
+5. Copie **todo** o conteúdo do SQL escolhido, do comentário inicial até `COMMIT;`.
+6. Cole no SQL Editor e clique **Run**.
+7. Verifique no Table Editor as tabelas `public.webhooks` e `public.webhook_events`.
+
+A atualização adiciona `deleted_at` e a função segura para excluir os logs de um webhook. Ela pode ser executada mais de uma vez.
 
 O arquivo não precisa de substituições, senha, URL ou chaves. Cria tabelas, índices, constraints, FK, funções, triggers, permissões e RLS em uma transação. `gen_random_uuid()` já existe nas versões PostgreSQL usadas pelo Supabase: nenhuma extensão adicional é necessária.
 

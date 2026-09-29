@@ -8,17 +8,20 @@ export function fixture() {
   let row: WebhookRow = {
     id: randomUUID(), public_id: randomUUID(), name: 'Integração Principal', module: 'delivery_webhook',
     active: true, auth_enabled: true, ...createToken(key),
-    created_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_received_at: null,
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_received_at: null, deleted_at: null,
   };
   const token = decryptToken(row.auth_token_encrypted, key);
   const db: Repository = {
     find: vi.fn(async () => row),
     list: vi.fn(async page => ({ items: [row], page, pageSize: 20, hasMore: false })),
+    options: vi.fn(async page => ({ items: [row], page, pageSize: 20, hasMore: false })),
     create: vi.fn(async values => ({ ...row, ...values, id: randomUUID(), public_id: randomUUID() })),
     update: vi.fn(async (_id, values) => { row = { ...row, ...values }; return row; }),
     record: vi.fn(async event => ({ id: randomUUID(), http_status: event.http_status, error_message: event.error_message })),
     events: vi.fn(async page => ({ items: [], page, pageSize: 20, hasMore: false })),
     event: vi.fn(async () => null),
+    deleteEvent: vi.fn(async () => true),
+    clearEvents: vi.fn(async () => 3),
   };
   return { row, token, db };
 }
